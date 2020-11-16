@@ -50,6 +50,7 @@ import org.apache.zookeeper.Watcher;
 import org.apache.zookeeper.ZKTestCase;
 import org.apache.zookeeper.ZooDefs;
 import org.apache.zookeeper.common.PathTrie;
+import org.apache.zookeeper.data.PathWithStat;
 import org.apache.zookeeper.data.Stat;
 import org.apache.zookeeper.metrics.MetricsUtils;
 import org.apache.zookeeper.txn.CreateTxn;
@@ -326,50 +327,53 @@ public class DataTreeTest extends ZKTestCase {
 
         //  Asking from a negative for 5 nodes should return the 5, and not set the watch
         int curWatchCount = dt.getWatchCount();
-        List<String> result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 5, -1, 0, null);
+        List<PathWithStat> result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 5, -1, 0);
         assertEquals(5, result.size());
         assertEquals("The watch not should have been set", curWatchCount, dt.getWatchCount());
         //  Verify that the list is sorted
         String before = "";
-        for (final String path : result) {
-            assertTrue(String.format("The next path (%s) should be > previous (%s)", path, before),
+        for (final PathWithStat s : result) {
+            final String path = s.getPath();
+            assertTrue(String.format("The next path (%s) should be > previons (%s)", path, before),
                     path.compareTo(before) > 0);
             before = path;
         }
 
         //  Asking from a negative would give me all children, and set the watch
         curWatchCount = dt.getWatchCount();
-        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), countNodes, -1, 0, null);
+        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), countNodes, -1, 0);
         assertEquals(countNodes, result.size());
         assertEquals("The watch should have been set", curWatchCount + 1, dt.getWatchCount());
         //  Verify that the list is sorted
         before = "";
-        for (final String path : result) {
-            assertTrue(String.format("The next path (%s) should be > previous (%s)", path, before),
+        for (final PathWithStat s : result) {
+            final String path = s.getPath();
+            assertTrue(String.format("The next path (%s) should be > previons (%s)", path, before),
                     path.compareTo(before) > 0);
             before = path;
         }
 
-        //  Asking from the last one should return only one node
+        //  Asking from the last one should return only onde node
         curWatchCount = dt.getWatchCount();
-        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 2, 1000 + countNodes - 1, 0, null);
+        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 2, 1000 + countNodes - 1, 0);
         assertEquals(1, result.size());
-        assertEquals("test-" + (countNodes - 1), result.get(0));
+        assertEquals("test-" + (countNodes - 1), result.get(0).getPath());
+        assertEquals(firstCzxId + countNodes - 1, result.get(0).getStat().getMzxid());
         assertEquals("The watch should have been set", curWatchCount + 1, dt.getWatchCount());
 
         //  Asking from the last created node+1 should return an empty list and set the watch
         curWatchCount = dt.getWatchCount();
-        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 2, 1000 + countNodes, 0, null);
+        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 2, 1000 + countNodes, 0);
         assertTrue("The result should be an empty list", result.isEmpty());
         assertEquals("The watch should have been set", curWatchCount + 1, dt.getWatchCount());
 
         //  Asking from -1 for one node should return two, and NOT set the watch
         curWatchCount = dt.getWatchCount();
-        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 1, -1, 0, null);
+        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 1, -1, 0);
         assertEquals("No watch should be set", curWatchCount, dt.getWatchCount());
         assertEquals("We only return up to ", 1, result.size());
         //  Check that we ordered correctly
-        assertEquals("test-0", result.get(0));
+        assertEquals("test-0", result.get(0).getPath());
     }
 
     @Test(timeout = 60000)
@@ -398,58 +402,59 @@ public class DataTreeTest extends ZKTestCase {
 
         //  Asking from a negative would give me all children, and set the watch
         int curWatchCount = dt.getWatchCount();
-        List<String> result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 1000, -1, 0, null);
+        List<PathWithStat> result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 1000, -1, 0);
         assertEquals(allNodes, result.size());
         assertEquals("The watch should have been set", curWatchCount + 1, dt.getWatchCount());
         //  Verify that the list is sorted
         String before = "";
-        for (final String path : result) {
-            assertTrue(String.format("The next path (%s) should be > previous (%s)", path, before),
+        for (final PathWithStat s : result) {
+            final String path = s.getPath();
+            assertTrue(String.format("The next path (%s) should be > previons (%s)", path, before),
                     path.compareTo(before) > 0);
             before = path;
         }
 
         //  Asking with offset minCzxId below childrenCzxId should not skip anything, regardless of offset
         curWatchCount = dt.getWatchCount();
-        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 2, childrenCzxId - 1, 3, null);
+        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 2, childrenCzxId - 1, 3);
         assertEquals(2, result.size());
-        assertEquals("test-1", result.get(0));
-        assertEquals("test-2", result.get(1));
+        assertEquals("test-1", result.get(0).getPath());
+        assertEquals("test-2", result.get(1).getPath());
         assertEquals("The watch should not have been set", curWatchCount, dt.getWatchCount());
 
         //  Asking with offset 5 should skip nodes 1, 2, 3, 4, 5
         curWatchCount = dt.getWatchCount();
-        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 2, childrenCzxId, 5, null);
+        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 2, childrenCzxId, 5);
         assertEquals(2, result.size());
-        assertEquals("test-6", result.get(0));
-        assertEquals("test-7", result.get(1));
+        assertEquals("test-6", result.get(0).getPath());
+        assertEquals("test-7", result.get(1).getPath());
         assertEquals("The watch should not have been set", curWatchCount, dt.getWatchCount());
 
         //  Asking with offset 5 for more nodes than are there should skip nodes 1, 2, 3, 4, 5 (plus 0 due to zxid)
         curWatchCount = dt.getWatchCount();
-        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 10, childrenCzxId, 5, null);
+        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 10, childrenCzxId, 5);
 
         assertEquals(5, result.size());
-        assertEquals("test-6", result.get(0));
-        assertEquals("test-7", result.get(1));
-        assertEquals("test-8", result.get(2));
-        assertEquals("test-9", result.get(3));
+        assertEquals("test-6", result.get(0).getPath());
+        assertEquals("test-7", result.get(1).getPath());
+        assertEquals("test-8", result.get(2).getPath());
+        assertEquals("test-9", result.get(3).getPath());
         assertEquals("The watch should have been set", curWatchCount + 1, dt.getWatchCount());
 
         //  Asking with offset 5 for fewer nodes than are there should skip nodes 1, 2, 3, 4, 5 (plus 0 due to zxid)
         curWatchCount = dt.getWatchCount();
-        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 4, childrenCzxId, 5, null);
+        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 4, childrenCzxId, 5);
 
         assertEquals(4, result.size());
-        assertEquals("test-6", result.get(0));
-        assertEquals("test-7", result.get(1));
-        assertEquals("test-8", result.get(2));
-        assertEquals("test-9", result.get(3));
+        assertEquals("test-6", result.get(0).getPath());
+        assertEquals("test-7", result.get(1).getPath());
+        assertEquals("test-8", result.get(2).getPath());
+        assertEquals("test-9", result.get(3).getPath());
         assertEquals("The watch should not have been set", curWatchCount, dt.getWatchCount());
 
         //  Asking from the last created node+1 should return an empty list and set the watch
         curWatchCount = dt.getWatchCount();
-        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 2, 1000 + childrenCzxId, 0, null);
+        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 2, 1000 + childrenCzxId, 0);
         assertTrue("The result should be an empty list", result.isEmpty());
         assertEquals("The watch should have been set", curWatchCount + 1, dt.getWatchCount());
     }
@@ -464,7 +469,7 @@ public class DataTreeTest extends ZKTestCase {
 
         //  Asking from a negative would give me all children, and set the watch
         int curWatchCount = dt.getWatchCount();
-        List<String> result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 100, -1, 0, null);
+        List<PathWithStat> result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 100, -1, 0);
         assertTrue("The result should be empty", result.isEmpty());
         assertEquals("The watch should have been set", curWatchCount + 1, dt.getWatchCount());
     }
