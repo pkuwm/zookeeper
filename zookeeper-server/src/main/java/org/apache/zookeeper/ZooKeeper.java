@@ -53,7 +53,6 @@ import org.apache.zookeeper.client.ZKClientConfig;
 import org.apache.zookeeper.client.ZooKeeperSaslClient;
 import org.apache.zookeeper.common.PathUtils;
 import org.apache.zookeeper.data.ACL;
-import org.apache.zookeeper.data.PathWithStat;
 import org.apache.zookeeper.data.Stat;
 import org.apache.zookeeper.proto.AddWatchRequest;
 import org.apache.zookeeper.proto.CheckWatchesRequest;
@@ -2769,11 +2768,15 @@ public class ZooKeeper implements AutoCloseable {
      * @param maxReturned
      *            - the maximum number of children returned
      * @param minCzxId
-     *            - only return children whose creation zkid is equal or greater than {@code minCzxId}
-     * @param czxIdOffset
-     *            - how many children with zkid == minCzxId to skip server-side, as they were returned in previous pages
+     *            - only return children whose creation zxid is equal or greater than {@code minCzxId}
+     * @param czxidOffset
+     *            - how many children with zxid == minCzxId to skip server-side, as they were returned in previous pages
+     * @param nextPage
+     *            - if not null, {@link PaginationNextPage} info returned from server will be copied to {@code nextPage}.
+     *            The info can be used for fetching the next page of remaining children, or checking whether the
+     *            returned page is the last one
      * @return
-     *            an ordered list of children nodes, up to {@code maxReturned}, ordered by czxid
+     *            a list of children nodes, up to {@code maxReturned}
      * @throws KeeperException
      *            if the server signals an error with a non-zero error code.
      * @throws IllegalArgumentException
@@ -2788,10 +2791,14 @@ public class ZooKeeper implements AutoCloseable {
      *
      * @since 3.6.2
      */
-    public List<PathWithStat> getChildren(final String path, Watcher watcher, final int maxReturned, final long minCzxId, final int czxIdOffset)
+    public List<String> getChildren(final String path,
+                                    Watcher watcher,
+                                    int maxReturned,
+                                    long minCzxId,
+                                    int czxidOffset,
+                                    final PaginationNextPage nextPage)
             throws KeeperException, InterruptedException {
-        final String clientPath = path;
-        PathUtils.validatePath(clientPath);
+        PathUtils.validatePath(path);
 
         if (maxReturned <= 0) {
             throw new IllegalArgumentException("Cannot return less than 1 children");
@@ -2800,10 +2807,10 @@ public class ZooKeeper implements AutoCloseable {
         // the watch contains the un-chroot path
         WatchRegistration wcb = null;
         if (watcher != null) {
-            wcb = new ChildWatchRegistration(watcher, clientPath);
+            wcb = new ChildWatchRegistration(watcher, path);
         }
 
-        final String serverPath = prependChroot(clientPath);
+        final String serverPath = prependChroot(path);
 
         RequestHeader h = new RequestHeader();
         h.setType(ZooDefs.OpCode.getChildrenPaginated);
@@ -2811,15 +2818,89 @@ public class ZooKeeper implements AutoCloseable {
         request.setPath(serverPath);
         request.setWatch(watcher != null);
         request.setMaxReturned(maxReturned);
-        request.setMinCzxId(minCzxId);
-        request.setCzxIdOffset(czxIdOffset);
-        GetChildrenPaginatedResponse response = new GetChildrenPaginatedResponse();
-        ReplyHeader r = cnxn.submitRequest(h, request, response, wcb);
-        if (r.getErr() != 0) {
-            throw KeeperException.create(KeeperException.Code.get(r.getErr()),
-                    clientPath);
+
+        Set<String> children = null;
+        GetChildrenPaginatedResponse response;
+        boolean isFirstPage = true;
+        boolean needNextPage = true;
+
+        while (needNextPage) {
+            request.setMinCzxid(minCzxId);
+            // If not the first page, always start from czxidOffset 0, to avoid the case:
+            // if a child with the same czxid is returned in the previous page, and then deleted
+            // on the server, the starting offset for the next page should be shifted smaller accordingly.
+            // If the next page still starts from czxidOffset, the children that not in the previous page
+            // but their offset is less than czxidOffset, they would be missed.
+            // HashSet is used to de-dup the duplicate children.
+            request.setCzxidOffset(isFirstPage ? czxidOffset : 0);
+            response = new GetChildrenPaginatedResponse();
+            ReplyHeader r = cnxn.submitRequest(h, request, response, wcb);
+            if (r.getErr() != 0) {
+                throw KeeperException.create(KeeperException.Code.get(r.getErr()),
+                        path);
+            }
+            minCzxId = response.getNextPageCzxid();
+            czxidOffset = response.getNextPageCzxidOffset();
+            needNextPage = needNextPage(maxReturned, minCzxId, czxidOffset);
+
+            if (isFirstPage) {
+                // If all children are returned in the first page,
+                // no need to use hash set to de-dup children
+                if (!needNextPage) {
+                    updateNextPage(nextPage, minCzxId, czxidOffset);
+                    return response.getChildren();
+                }
+                children = new HashSet<>();
+                isFirstPage = false;
+            }
+
+            children.addAll(response.getChildren());
         }
-        return response.getChildren();
+
+        updateNextPage(nextPage, minCzxId, czxidOffset);
+
+        return new ArrayList<>(children);
+    }
+
+    /**
+     * Returns a list of all the children given the path.
+     * <p>
+     * The difference between this API and {@link #getChildren(String, boolean)} is:
+     * when there are lots of children and the network buffer exceeds {@code jute.maxbuffer},
+     * this API will fetch the children using pagination and be able to return all children;
+     * while {@link #getChildren(String, boolean)} will fail.
+     * <p>
+     * The final list of children returned is NOT strongly consistent with the server's data:
+     * the list might contain some deleted children if some children are deleted before the last page is fetched.
+     * <p>
+     * If the watch is true and the call is successful (no exception is thrown),
+     # a watch will be left on the node with the given path. The watch will be
+     * triggered by a successful operation that deletes the node of the given
+     * path or creates/deletes a child under the node.
+     * <p>
+     *
+     * @param path the path of the parent node
+     * @param watch whether or not leave a watch on the given node
+     * @return a list of all children of the given path
+     * @throws KeeperException if the server signals an error with a non-zero error code.
+     * @throws InterruptedException if the server transaction is interrupted.
+     */
+    public List<String> getAllChildrenPaginated(String path, boolean watch)
+            throws KeeperException, InterruptedException {
+        return getChildren(path, watch ? watchManager.defaultWatcher : null, Integer.MAX_VALUE, 0L, 0, null);
+    }
+
+    private boolean needNextPage(int maxReturned, long minCzxId, int czxIdOffset) {
+        return maxReturned == Integer.MAX_VALUE
+                && minCzxId != ZooDefs.GetChildrenPaginated.lastPageMinCzxid
+                && czxIdOffset != ZooDefs.GetChildrenPaginated.lastPageMinCzxidOffset;
+    }
+
+    private void updateNextPage(PaginationNextPage nextPage, long minCzxId, int czxIdOffset) {
+        if (nextPage != null) {
+            nextPage.setMinCzxid(minCzxId);
+            nextPage.setMinCzxidOffset(czxIdOffset);
+        }
     }
 
     /**
@@ -2853,7 +2934,7 @@ public class ZooKeeper implements AutoCloseable {
      *
      * @since 3.6.2
      */
-    public RemoteIterator<PathWithStat> getChildrenIterator(String path, Watcher watcher, int batchSize, long minCzxId)
+    public RemoteIterator<String> getChildrenIterator(String path, Watcher watcher, int batchSize, long minCzxId)
             throws KeeperException, InterruptedException {
         return new ChildrenBatchIterator(this, path, watcher, batchSize, minCzxId);
     }
