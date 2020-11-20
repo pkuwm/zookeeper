@@ -45,6 +45,7 @@ import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.KeeperException.Code;
 import org.apache.zookeeper.KeeperException.NoNodeException;
 import org.apache.zookeeper.KeeperException.NodeExistsException;
+import org.apache.zookeeper.PaginationNextPage;
 import org.apache.zookeeper.Quotas;
 import org.apache.zookeeper.StatsTrack;
 import org.apache.zookeeper.WatchedEvent;
@@ -808,15 +809,17 @@ public class DataTree {
      * Produces a paginated list of the children of a given path
      * @param path path of node node to list
      * @param stat stat of the node to list
-     * @param watcher an optional watcher to attach to the node. The watcher is added only once when reaching the end of pagination
+     * @param watcher an optional watcher to attach to the node. The watcher is added only once when reaching the end of
+     *               pagination
      * @param maxReturned maximum number of children to return. Return one more than this number to indicate truncation
      * @param minCzxId only return children whose creation zxid equal or greater than minCzxId
      * @param czxIdOffset how many children with zxid == minCzxId to skip (as returned in previous pages)
-     * @return A list of path with stats
+     * @param nextPage info to be used for the next page call
+     * @return A list of child names of the given path
      * @throws NoNodeException if the path does not exist
      */
-    public List<PathWithStat> getPaginatedChildren(String path, Stat stat, Watcher watcher, int maxReturned,
-                                                   long minCzxId, long czxIdOffset)
+    public List<String> getPaginatedChildren(String path, Stat stat, Watcher watcher, int maxReturned,
+                                             long minCzxId, long czxIdOffset, PaginationNextPage nextPage)
             throws NoNodeException {
         DataNode n = nodes.get(path);
         if (n == null) {
@@ -865,9 +868,9 @@ public class DataTree {
             }
 
             // Return as list preserving newer-to-older order
-            LinkedList<PathWithStat> result = new LinkedList<PathWithStat>();
+            LinkedList<String> result = new LinkedList<String>();
             while (!childrenQueue.isEmpty() && result.size() < maxReturned) {
-                result.addLast(childrenQueue.poll());
+                result.addLast(childrenQueue.poll().getPath());
             }
 
             // This is the last page, set the watch

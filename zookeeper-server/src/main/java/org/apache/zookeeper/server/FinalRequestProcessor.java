@@ -21,6 +21,7 @@ package org.apache.zookeeper.server;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
@@ -42,6 +43,7 @@ import org.apache.zookeeper.OpResult.ErrorResult;
 import org.apache.zookeeper.OpResult.GetChildrenResult;
 import org.apache.zookeeper.OpResult.GetDataResult;
 import org.apache.zookeeper.OpResult.SetDataResult;
+import org.apache.zookeeper.PaginationNextPage;
 import org.apache.zookeeper.Watcher.WatcherType;
 import org.apache.zookeeper.ZooDefs;
 import org.apache.zookeeper.ZooDefs.OpCode;
@@ -574,13 +576,15 @@ public class FinalRequestProcessor implements RequestProcessor {
                         request.authInfo, path,
                         null);
                 final int maxReturned = getChildrenPaginatedRequest.getMaxReturned();
-                List<PathWithStat> list = zks.getZKDatabase().getPaginatedChildren(
+                final PaginationNextPage nextPage = new PaginationNextPage();
+                List<String> list = zks.getZKDatabase().getPaginatedChildren(
                         getChildrenPaginatedRequest.getPath(), stat,
                         getChildrenPaginatedRequest.getWatch() ? cnxn : null,
                         maxReturned,
-                        getChildrenPaginatedRequest.getMinCzxId(),
-                        getChildrenPaginatedRequest.getCzxIdOffset());
-                rsp = new GetChildrenPaginatedResponse(list, stat);
+                        getChildrenPaginatedRequest.getMinCzxid(),
+                        getChildrenPaginatedRequest.getCzxidOffset(),
+                        nextPage);
+                rsp = new GetChildrenPaginatedResponse(list, stat, nextPage.getMinCzxid(), nextPage.getMinCzxidOffset());
                 break;
             }
             }
