@@ -28,16 +28,21 @@ import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import org.apache.jute.BinaryInputArchive;
+import org.apache.jute.BinaryOutputArchive;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.OpResult;
+import org.apache.zookeeper.PaginationNextPage;
 import org.apache.zookeeper.RemoteIterator;
 import org.apache.zookeeper.Transaction;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
+import org.apache.zookeeper.ZooDefs;
 import org.apache.zookeeper.ZooDefs.Ids;
 import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.data.Stat;
+import org.apache.zookeeper.server.DataTree;
+import org.apache.zookeeper.server.quorum.BufferStats;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -366,9 +371,7 @@ public class GetChildrenPaginatedTest extends ClientBase {
     }
 
     /*
-     * Tests if all children's packet exceeds jute.maxbuffer, it can still successfully fetch them.
-     * The packet length computation formula is also tested through this test. Otherwise, it'll
-     * fail to return all children with the paginated API.
+     * Tests if all children's packet exceeds jute.maxbuffer, the paginated API can still successfully fetch them.
      */
     @Test(timeout = 60000)
     public void testGetAllChildrenPaginatedMultiPages() throws InterruptedException, KeeperException {
@@ -405,5 +408,126 @@ public class GetChildrenPaginatedTest extends ClientBase {
 
         Assert.assertEquals(numChildren, actualChildren.size());
         Assert.assertEquals(expectedChildren, new HashSet<>(actualChildren));
+    }
+
+    /*
+     * Tests the packet length formula in DataTree as expected. The packet length calculated
+     * is equal to the actual buffer size of the client response.
+     */
+    @Test(timeout = 60000)
+    public void testPacketLengthFormula() throws KeeperException, InterruptedException {
+        final String basePath = "/testPagination-" + UUID.randomUUID().toString();
+        zk.create(basePath, new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+
+        Set<String> expectedChildren = new HashSet<>();
+        int numChildren = 50 + random.nextInt(50);
+
+        for (int i = 0; i < numChildren; i++) {
+            String child = UUID.randomUUID().toString();
+            String childPath = basePath + "/" + child;
+            zk.create(childPath, new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+            expectedChildren.add(child);
+        }
+
+        // Fetch max number of children that can fit into one page. The client response stat should record the same
+        // buffer size as the packet length calculated by the formula in DataTree.
+        PaginationNextPage nextPage = new PaginationNextPage();
+
+        // First page
+        List<String> firstPage = zk.getChildren(basePath, null, numChildren, 0, 0, nextPage);
+        BufferStats clientResponseStats = serverFactory.getZooKeeperServer().serverStats().getClientResponseStats();
+        int expectedPacketLength =
+                (DataTree.PAGINATION_PACKET_CHILD_EXTRA_BYTES + UUID.randomUUID().toString().length())
+                        * firstPage.size() + DataTree.PAGINATION_PACKET_BASE_BYTES;
+        int actualBufferSize = clientResponseStats.getLastBufferSize();
+
+        Assert.assertEquals("The page should be the last page.",
+                ZooDefs.GetChildrenPaginated.lastPageMinCzxid, nextPage.getMinCzxid());
+        Assert.assertEquals("The client response buffer size should be equal to the packet length calculated by "
+                + "pagination formula in DataTree.", expectedPacketLength, actualBufferSize);
+        Assert.assertTrue(actualBufferSize <= BinaryInputArchive.maxBuffer);
+
+        Assert.assertEquals(expectedChildren, new HashSet<>(firstPage));
+    }
+
+    /*
+     * Tests below logic:
+     * 1. the packet length formula is as expected. The calculated length is equal to the actual
+     * client response's buffer size.
+     * 2. logic of adding children on server side is correct. It does not miss the last child.
+     * 3. watch is only added in the last page.
+     */
+    @Test(timeout = 60000)
+    public void testMaxNumChildrenPageWatch() throws KeeperException, InterruptedException {
+        // Get the max number of UUID children that can return in a page.
+        int numChildren = (BinaryInputArchive.maxBuffer - DataTree.PAGINATION_PACKET_BASE_BYTES)
+                / (UUID.randomUUID().toString().length() + DataTree.PAGINATION_PACKET_CHILD_EXTRA_BYTES);
+        // The packet will exceed 1 MB.
+        numChildren++;
+
+        final String basePath = "/testPagination-" + UUID.randomUUID().toString();
+
+        zk.create(basePath, new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+
+        Set<String> expectedChildren = new HashSet<>();
+
+        for (int i = 0; i < numChildren; i += 1000) {
+            Transaction transaction = zk.transaction();
+            for (int j = i; j < i + 1000 && j < numChildren; j++) {
+                String child = UUID.randomUUID().toString();
+                String childPath = basePath + "/" + child;
+                transaction.create(childPath, new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+                expectedChildren.add(child);
+            }
+            transaction.commit();
+        }
+
+        // Fetch max number of children that can fit into one page. The client response stat should record the same
+        // buffer size as the packet length calculated by the formula in DataTree.
+        PaginationNextPage nextPage = new PaginationNextPage();
+        FireOnlyOnceWatcher fireOnlyOnceWatcher = new FireOnlyOnceWatcher();
+
+        // First page
+        List<String> firstPage = zk.getChildren(basePath, fireOnlyOnceWatcher, numChildren, 0, 0, nextPage);
+        BufferStats clientResponseStats = serverFactory.getZooKeeperServer().serverStats().getClientResponseStats();
+        int expectedPacketLength =
+                (DataTree.PAGINATION_PACKET_CHILD_EXTRA_BYTES + UUID.randomUUID().toString().length())
+                        * firstPage.size() + DataTree.PAGINATION_PACKET_BASE_BYTES;
+        int actualBufferSize = clientResponseStats.getLastBufferSize();
+
+        Assert.assertNotEquals("The page should not be the last page.",
+                ZooDefs.GetChildrenPaginated.lastPageMinCzxid, nextPage.getMinCzxid());
+        Assert.assertEquals("The client response buffer size should be equal to the packet length calculated by "
+                + "pagination formula in DataTree.", expectedPacketLength, actualBufferSize);
+        Assert.assertTrue(actualBufferSize <= BinaryInputArchive.maxBuffer);
+
+        // Verify the index on server is correct: not adding the last child in the first page.
+        Assert.assertEquals(numChildren - 1, firstPage.size());
+
+        // Modify the first child of each page.
+        // This should not trigger additional watches or create duplicates in the set of children returned
+        zk.setData(basePath + "/" + firstPage.get(0), new byte[3], -1);
+
+        synchronized(fireOnlyOnceWatcher) {
+            Assert.assertEquals("Watch should not have fired yet", 0, fireOnlyOnceWatcher.watchFiredCount);
+        }
+
+        // Second page
+        List<String> secondPage = zk.getChildren(basePath, fireOnlyOnceWatcher, numChildren, nextPage.getMinCzxid(),
+                nextPage.getMinCzxidOffset(), nextPage);
+
+        // Verify the logic of adding children to page in DataTree is correct.
+        Assert.assertEquals(ZooDefs.GetChildrenPaginated.lastPageMinCzxid, nextPage.getMinCzxid());
+        Assert.assertEquals("Should expect only 1 child left in the second page", 1, secondPage.size());
+
+        zk.setData(basePath + "/" + secondPage.get(0), new byte[3], -1);
+
+        synchronized(fireOnlyOnceWatcher) {
+            Assert.assertEquals("Watch has fired", 0, fireOnlyOnceWatcher.watchFiredCount);
+        }
+
+        Set<String> actualSet = new HashSet<>(firstPage);
+        actualSet.addAll(secondPage);
+        Assert.assertEquals(expectedChildren, actualSet);
     }
 }

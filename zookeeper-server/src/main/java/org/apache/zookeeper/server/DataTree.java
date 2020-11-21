@@ -183,8 +183,8 @@ public class DataTree {
     // Constants used to calculate response packet length for the paginated children list.
     // packetLength = (childNameLength + PAGINATION_PACKET_CHILD_EXTRA_BYTES) * numChildren
     //                + PAGINATION_PACKET_BASE_BYTES
-    private static final int PAGINATION_PACKET_BASE_BYTES;
-    private static final int PAGINATION_PACKET_CHILD_EXTRA_BYTES;
+    public static final int PAGINATION_PACKET_BASE_BYTES;
+    public static final int PAGINATION_PACKET_CHILD_EXTRA_BYTES;
 
     static {
         PAGINATION_PACKET_BASE_BYTES = getPaginationPacketLength(Collections.emptyList());
@@ -868,7 +868,7 @@ public class DataTree {
                     n.copyStat(stat);
                 }
                 allChildren = n.getChildren();
-                if (isPacketLengthBelowMaxBuffer(computeChildrenPacketLength(allChildren))) {
+                if (canPacketFitInMaxBuffer(computeChildrenPacketLength(allChildren))) {
                     isBelowMaxBuffer = true;
                     if (watcher != null) {
                         childWatches.addWatch(path, watcher);
@@ -916,7 +916,7 @@ public class DataTree {
                  index++) {
                 String child = targetChildren.get(index).getPath();
                 packetLength += child.length() + PAGINATION_PACKET_CHILD_EXTRA_BYTES;
-                if (!isPacketLengthBelowMaxBuffer(packetLength)) {
+                if (!canPacketFitInMaxBuffer(packetLength)) {
                     // Stop adding more children to ensure packet is below max buffer
                     break;
                 }
@@ -939,8 +939,8 @@ public class DataTree {
         return paginatedChildren;
     }
 
-    private boolean isPacketLengthBelowMaxBuffer(int packetLength) {
-        return packetLength < BinaryInputArchive.maxBuffer;
+    private boolean canPacketFitInMaxBuffer(int packetLength) {
+        return packetLength <= BinaryInputArchive.maxBuffer;
     }
 
     private void buildChildrenPathWithStat(DataNode n, String path, Stat stat, long minCzxId,

@@ -27,14 +27,6 @@ public class PaginationNextPage {
     private long minCzxid;
     private int minCzxidOffset;
 
-    public PaginationNextPage() {
-    }
-
-    public PaginationNextPage(long minCzxid, int minCzxidOffset) {
-        this.minCzxid = minCzxid;
-        this.minCzxidOffset = minCzxidOffset;
-    }
-
     public long getMinCzxid() {
         return minCzxid;
     }

@@ -310,7 +310,7 @@ public class DataTreeTest extends ZKTestCase {
     }
 
     @Test(timeout = 60000)
-    public void getChildrenPaginated() throws NodeExistsException, NoNodeException {
+    public void testGetChildrenPaginated() throws NodeExistsException, NoNodeException {
         final String rootPath = "/children";
         final int firstCzxId = 1000;
         final int countNodes = 10;
@@ -373,7 +373,7 @@ public class DataTreeTest extends ZKTestCase {
     }
 
     @Test(timeout = 60000)
-    public void getChildrenPaginatedWithOffset() throws NodeExistsException, NoNodeException {
+    public void testGetChildrenPaginatedWithOffset() throws NodeExistsException, NoNodeException {
         final String rootPath = "/children";
         final int childrenCzxId = 1000;
         final int countNodes = 9;
@@ -455,16 +455,23 @@ public class DataTreeTest extends ZKTestCase {
     }
 
     @Test(timeout = 60000)
-    public void getChildrenPaginatedEmpty() throws NodeExistsException, NoNodeException {
+    public void testGetChildrenPaginatedEmpty() throws NodeExistsException, NoNodeException {
         final String rootPath = "/children";
 
         //  Create the parent node
         DataTree dt = new DataTree();
         dt.createNode(rootPath, new byte[0], null, 0, dt.getNode("/").stat.getCversion() + 1, 1, 1);
 
-        //  Asking from a negative would give me all children, and set the watch
+        // Asking from a negative would give me all children, and set the watch
+        // This goes to the pagination branch.
         int curWatchCount = dt.getWatchCount();
         List<String> result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), 100, -1, 0, null);
+        assertTrue("The result should be empty", result.isEmpty());
+        assertEquals("The watch should have been set", curWatchCount + 1, dt.getWatchCount());
+
+        // Specify max int to fetch all children - trying to return all all without sorting, and set the watch
+        curWatchCount = dt.getWatchCount();
+        result = dt.getPaginatedChildren(rootPath, null, new DummyWatcher(), Integer.MAX_VALUE, 0, 0, null);
         assertTrue("The result should be empty", result.isEmpty());
         assertEquals("The watch should have been set", curWatchCount + 1, dt.getWatchCount());
     }
