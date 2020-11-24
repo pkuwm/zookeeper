@@ -28,7 +28,6 @@ import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import org.apache.jute.BinaryInputArchive;
-import org.apache.jute.BinaryOutputArchive;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.OpResult;

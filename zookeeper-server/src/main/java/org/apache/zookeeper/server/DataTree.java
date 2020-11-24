@@ -857,39 +857,33 @@ public class DataTree {
             throw new KeeperException.NoNodeException();
         }
 
-        if (maxReturned == Integer.MAX_VALUE && minCzxId <= 0 && czxIdOffset <= 0) {
-            // This request is to fetch all children. Check if all children can be returned in a page.
-            Set<String> allChildren;
-            boolean isBelowMaxBuffer = false;
-
+        if (maxReturned == Integer.MAX_VALUE && minCzxId <= 0) {
+            List<String> allChildren;
+            boolean canFitInMaxBuffer = false;
             // Need to lock the parent node for the whole block between reading children list and adding watch
             synchronized (n) {
                 if (stat != null) {
                     n.copyStat(stat);
                 }
-                allChildren = n.getChildren();
+                allChildren = new ArrayList<>(n.getChildren());
                 if (canPacketFitInMaxBuffer(computeChildrenPacketLength(allChildren))) {
-                    isBelowMaxBuffer = true;
+                    // If all children can be returned in the first page, just return them without sorting.
+                    canFitInMaxBuffer = true;
                     if (watcher != null) {
                         childWatches.addWatch(path, watcher);
                     }
                 }
             }
-
-            if (isBelowMaxBuffer) {
-                // If all children can be returned in the first page, just return them without sorting.
-                int bytes = allChildren.stream().mapToInt(String::length).sum();
-                updateReadStat(path, bytes);
+            if (canFitInMaxBuffer) {
+                updateReadStat(path, countReadChildrenBytes(allChildren));
                 if (nextPage != null) {
                     nextPage.setMinCzxid(ZooDefs.GetChildrenPaginated.lastPageMinCzxid);
-                    nextPage.setMinCzxidOffset(ZooDefs.GetChildrenPaginated.lastPageMinCzxidOffset);
                 }
-                return new ArrayList<>(allChildren);
+                return allChildren;
             }
         }
 
         int index = 0;
-        int bytes = 0;
         List<PathWithStat> targetChildren = new ArrayList<PathWithStat>();
         List<String> paginatedChildren = new ArrayList<String>();
 
@@ -921,7 +915,6 @@ public class DataTree {
                     break;
                 }
                 paginatedChildren.add(child);
-                bytes += child.length();
             }
 
             // Decrement index as it was incremented once before exiting the for-loop.
@@ -934,13 +927,17 @@ public class DataTree {
         }
 
         updateNextPage(nextPage, targetChildren, index);
-        updateReadStat(path, bytes);
+        updateReadStat(path, countReadChildrenBytes(paginatedChildren));
 
         return paginatedChildren;
     }
 
     private boolean canPacketFitInMaxBuffer(int packetLength) {
         return packetLength <= BinaryInputArchive.maxBuffer;
+    }
+
+    private int countReadChildrenBytes(Collection<String> children) {
+        return children.stream().mapToInt(String::length).sum();
     }
 
     private void buildChildrenPathWithStat(DataNode n, String path, Stat stat, long minCzxId,
@@ -984,7 +981,6 @@ public class DataTree {
         if (lastAddedIndex == children.size() - 1) {
             // All children are added, so this is the last page
             nextPage.setMinCzxid(ZooDefs.GetChildrenPaginated.lastPageMinCzxid);
-            nextPage.setMinCzxidOffset(ZooDefs.GetChildrenPaginated.lastPageMinCzxidOffset);
             return;
         }
 

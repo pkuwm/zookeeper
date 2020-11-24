@@ -71,8 +71,7 @@ class ChildrenBatchIterator implements RemoteIterator<String> {
         }
 
         // If we're down to the last element, backfill before returning it
-        if (childrenQueue.size() == 1 && nextBatchMinZxid != ZooDefs.GetChildrenPaginated.lastPageMinCzxid
-                && nextBatchZxidOffset != ZooDefs.GetChildrenPaginated.lastPageMinCzxidOffset) {
+        if (childrenQueue.size() == 1 && nextBatchMinZxid != ZooDefs.GetChildrenPaginated.lastPageMinCzxid) {
             batchGetChildren();
         }
 

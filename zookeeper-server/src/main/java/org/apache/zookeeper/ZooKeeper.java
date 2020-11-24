@@ -2841,7 +2841,7 @@ public class ZooKeeper implements AutoCloseable {
             }
             minCzxId = response.getNextPageCzxid();
             czxidOffset = response.getNextPageCzxidOffset();
-            needNextPage = needNextPage(maxReturned, minCzxId, czxidOffset);
+            needNextPage = needNextPage(maxReturned, minCzxId);
 
             if (isFirstPage) {
                 // If all children are returned in the first page,
@@ -2877,7 +2877,6 @@ public class ZooKeeper implements AutoCloseable {
      # a watch will be left on the node with the given path. The watch will be
      * triggered by a successful operation that deletes the node of the given
      * path or creates/deletes a child under the node.
-     * <p>
      *
      * @param path the path of the parent node
      * @param watch whether or not leave a watch on the given node
@@ -2890,10 +2889,9 @@ public class ZooKeeper implements AutoCloseable {
         return getChildren(path, watch ? watchManager.defaultWatcher : null, Integer.MAX_VALUE, 0L, 0, null);
     }
 
-    private boolean needNextPage(int maxReturned, long minCzxId, int czxIdOffset) {
+    private boolean needNextPage(int maxReturned, long minCzxId) {
         return maxReturned == Integer.MAX_VALUE
-                && minCzxId != ZooDefs.GetChildrenPaginated.lastPageMinCzxid
-                && czxIdOffset != ZooDefs.GetChildrenPaginated.lastPageMinCzxidOffset;
+                && minCzxId != ZooDefs.GetChildrenPaginated.lastPageMinCzxid;
     }
 
     private void updateNextPage(PaginationNextPage nextPage, long minCzxId, int czxIdOffset) {
