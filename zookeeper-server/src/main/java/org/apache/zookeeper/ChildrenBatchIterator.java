@@ -88,7 +88,7 @@ class ChildrenBatchIterator implements RemoteIterator<String> {
 
     private void batchGetChildren() throws KeeperException, InterruptedException {
         List<String> childrenBatch =
-                zooKeeper.getChildren(path, watcher, batchSize, nextBatchMinZxid, nextBatchZxidOffset, nextPage);
+                zooKeeper.getChildren(path, watcher, batchSize, nextBatchMinZxid, nextBatchZxidOffset, null, nextPage);
         childrenQueue.addAll(childrenBatch);
         updateOffsetsForNextBatch();
     }

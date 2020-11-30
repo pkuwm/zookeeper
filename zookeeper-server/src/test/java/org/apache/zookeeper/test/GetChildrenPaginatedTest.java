@@ -433,7 +433,7 @@ public class GetChildrenPaginatedTest extends ClientBase {
         PaginationNextPage nextPage = new PaginationNextPage();
 
         // First page
-        List<String> firstPage = zk.getChildren(basePath, null, numChildren, 0, 0, nextPage);
+        List<String> firstPage = zk.getChildren(basePath, null, numChildren, 0, 0, null, nextPage);
         BufferStats clientResponseStats = serverFactory.getZooKeeperServer().serverStats().getClientResponseStats();
         int expectedPacketLength =
                 (DataTree.PAGINATION_PACKET_CHILD_EXTRA_BYTES + UUID.randomUUID().toString().length())
@@ -487,7 +487,7 @@ public class GetChildrenPaginatedTest extends ClientBase {
         FireOnlyOnceWatcher fireOnlyOnceWatcher = new FireOnlyOnceWatcher();
 
         // First page
-        List<String> firstPage = zk.getChildren(basePath, fireOnlyOnceWatcher, numChildren, 0, 0, nextPage);
+        List<String> firstPage = zk.getChildren(basePath, fireOnlyOnceWatcher, numChildren, 0, 0, null, nextPage);
         BufferStats clientResponseStats = serverFactory.getZooKeeperServer().serverStats().getClientResponseStats();
         int expectedPacketLength =
                 (DataTree.PAGINATION_PACKET_CHILD_EXTRA_BYTES + UUID.randomUUID().toString().length())
@@ -513,7 +513,7 @@ public class GetChildrenPaginatedTest extends ClientBase {
 
         // Second page
         List<String> secondPage = zk.getChildren(basePath, fireOnlyOnceWatcher, numChildren, nextPage.getMinCzxid(),
-                nextPage.getMinCzxidOffset(), nextPage);
+                nextPage.getMinCzxidOffset(), null, nextPage);
 
         // Verify the logic of adding children to page in DataTree is correct.
         Assert.assertEquals(ZooDefs.GetChildrenPaginated.lastPageMinCzxid, nextPage.getMinCzxid());

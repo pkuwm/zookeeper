@@ -845,12 +845,12 @@ public class DataTree {
      * @param maxReturned maximum number of children to return.
      * @param minCzxId only return children whose creation zxid equal or greater than minCzxId
      * @param czxIdOffset how many children with zxid == minCzxId to skip (as returned in previous pages)
-     * @param nextPage info to be used for the next page call
+     * @param outputNextPage info to be used for the next page call
      * @return A list of child names of the given path
      * @throws NoNodeException if the path does not exist
      */
     public List<String> getPaginatedChildren(String path, Stat stat, Watcher watcher, int maxReturned,
-                                             long minCzxId, int czxIdOffset, PaginationNextPage nextPage)
+                                             long minCzxId, int czxIdOffset, PaginationNextPage outputNextPage)
             throws NoNodeException {
         DataNode n = nodes.get(path);
         if (n == null) {
@@ -876,8 +876,8 @@ public class DataTree {
             }
             if (canFitInMaxBuffer) {
                 updateReadStat(path, countReadChildrenBytes(allChildren));
-                if (nextPage != null) {
-                    nextPage.setMinCzxid(ZooDefs.GetChildrenPaginated.lastPageMinCzxid);
+                if (outputNextPage != null) {
+                    outputNextPage.setMinCzxid(ZooDefs.GetChildrenPaginated.lastPageMinCzxid);
                 }
                 return allChildren;
             }
@@ -926,7 +926,7 @@ public class DataTree {
             }
         }
 
-        updateNextPage(nextPage, targetChildren, index);
+        updateNextPage(outputNextPage, targetChildren, index);
         updateReadStat(path, countReadChildrenBytes(paginatedChildren));
 
         return paginatedChildren;
