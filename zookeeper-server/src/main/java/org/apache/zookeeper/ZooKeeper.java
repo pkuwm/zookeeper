@@ -2781,9 +2781,14 @@ public class ZooKeeper implements AutoCloseable {
      * @param outputNextPage
      *            - if not null, {@link PaginationNextPage} info returned from server will be copied to
      *            {@code outputNextPage}. The info can be used for fetching the next page of remaining children,
-     *            or checking whether the returned page is the last page.
+     *            or checking whether the returned page is the last page by comparing
+     *            {@link PaginationNextPage#getMinCzxid()} with
+     *            {@link org.apache.zookeeper.ZooDefs.GetChildrenPaginated#lastPageMinCzxid}
      * @return
-     *            a list of children nodes, up to {@code maxReturned}
+     *            a list of children nodes, up to {@code maxReturned}.
+     *            <p>When params are set {@code maxReturned} = {@code Integer.MAX_VALUE}, {@code minCzxid} <= 0:
+     *            the children list is unordered if all the children can be returned in a page;
+     *            <p>Otherwise, the children list is ordered by czxid.
      * @throws KeeperException
      *            if the server signals an error with a non-zero error code.
      * @throws IllegalArgumentException
@@ -2860,7 +2865,7 @@ public class ZooKeeper implements AutoCloseable {
      *
      * @param path the path of the parent node
      * @param watch whether or not leave a watch on the given node
-     * @return a list of all children of the given path
+     * @return a unordered list of all children of the given path
      * @throws KeeperException if the server signals an error with a non-zero error code.
      * @throws InterruptedException if the server transaction is interrupted.
      */
@@ -2874,21 +2879,39 @@ public class ZooKeeper implements AutoCloseable {
         }
 
         Set<String> childrenSet = new HashSet<>(childrenPaginated);
+        getChildrenRemainingPages(path, watcher, nextPage, childrenSet);
+
+        return new ArrayList<>(childrenSet);
+    }
+
+    private void getChildrenRemainingPages(String path,
+                                           Watcher watcher,
+                                           PaginationNextPage nextPage,
+                                           Set<String> childrenSet) throws KeeperException, InterruptedException {
+        int retryCount = 0;
         do {
+            List<String> childrenPaginated;
             long minCzxid = nextPage.getMinCzxid();
-            // If a child with the same czxid is returned in the previous page, and then deleted
-            // on the server, the children not in the previous page but offset is less than czxidOffset
-            // would be missed in the next page. Use the last child in the previous page to determine whether or not
-            // the deletion case happens. If it happens, retry fetching the page starting from offset 0.
-            int czxidOffset = nextPage.getMinCzxidOffset() - 1;
-            childrenPaginated = getChildren(path, watcher, Integer.MAX_VALUE, minCzxid, czxidOffset, null, nextPage);
-            if (!childrenPaginated.isEmpty() && !childrenSet.contains(childrenPaginated.get(0))) {
-                childrenPaginated = getChildren(path, watcher, Integer.MAX_VALUE, minCzxid, 0, null, nextPage);
+            if (nextPage.getMinCzxidOffset() == 0) {
+                childrenPaginated = getChildren(path, watcher, Integer.MAX_VALUE, minCzxid,
+                        nextPage.getMinCzxidOffset(), null, nextPage);
+            } else {
+                // If a child with the same czxid is returned in the previous page, and then deleted
+                // on the server, the children not in the previous page but offset is less than czxidOffset
+                // would be missed in the next page. Use the last child in the previous page to determine whether or not
+                // the deletion case happens. If it happens, retry fetching the page starting from offset 0.
+                childrenPaginated = getChildren(path, watcher, Integer.MAX_VALUE, minCzxid,
+                        nextPage.getMinCzxidOffset() - 1, null, nextPage);
+                if (!childrenPaginated.isEmpty() && !childrenSet.contains(childrenPaginated.get(0))) {
+                    if (retryCount++ >= 3) {
+                        throw KeeperException.create(Code.OPERATIONTIMEOUT);
+                    }
+                    LOG.info("Retry fetching children for minZxid = {}, retries = {}", minCzxid, retryCount);
+                    childrenPaginated = getChildren(path, watcher, Integer.MAX_VALUE, minCzxid, 0, null, nextPage);
+                }
             }
             childrenSet.addAll(childrenPaginated);
         } while (nextPage.getMinCzxid() != ZooDefs.GetChildrenPaginated.lastPageMinCzxid);
-
-        return new ArrayList<>(childrenSet);
     }
 
     private void updateNextPage(PaginationNextPage nextPage, long minCzxId, int czxIdOffset) {

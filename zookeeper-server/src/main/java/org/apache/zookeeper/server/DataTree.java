@@ -878,18 +878,25 @@ public class DataTree {
                 updateReadStat(path, countReadChildrenBytes(allChildren));
                 if (outputNextPage != null) {
                     outputNextPage.setMinCzxid(ZooDefs.GetChildrenPaginated.lastPageMinCzxid);
+                    outputNextPage.setMinCzxidOffset(ZooDefs.GetChildrenPaginated.lastPageCzxidOffset);
                 }
                 return allChildren;
             }
         }
 
+        return getSortedPaginatedChildren(n, path, stat, watcher, maxReturned, minCzxId, czxIdOffset, outputNextPage);
+    }
+
+    private List<String> getSortedPaginatedChildren(DataNode node, String path, Stat stat, Watcher watcher,
+                                                    int maxReturned, long minCzxId, int czxIdOffset,
+                                                    PaginationNextPage outputNextPage) {
         int index = 0;
         List<PathWithStat> targetChildren = new ArrayList<PathWithStat>();
         List<String> paginatedChildren = new ArrayList<String>();
 
         // Need to lock the parent node for the whole block between reading children list and adding watch
-        synchronized (n) {
-            buildChildrenPathWithStat(n, path, stat, minCzxId, targetChildren);
+        synchronized (node) {
+            buildChildrenPathWithStat(node, path, stat, minCzxId, targetChildren);
 
             targetChildren.sort(staticNodeCreationComparator);
 
@@ -981,22 +988,30 @@ public class DataTree {
         if (lastAddedIndex == children.size() - 1) {
             // All children are added, so this is the last page
             nextPage.setMinCzxid(ZooDefs.GetChildrenPaginated.lastPageMinCzxid);
+            nextPage.setMinCzxidOffset(ZooDefs.GetChildrenPaginated.lastPageCzxidOffset);
             return;
         }
 
-        // Find the minCzxidOffset next next page by searching the index (startIndex) of czxid
-        // that is not equal to current czxid.
-        // minCzxidOffset of next page = lastAddedIndex - startIndex
         long lastCzxid = children.get(lastAddedIndex).getStat().getCzxid();
-        int startIndex = lastAddedIndex;
-        while (startIndex >= 0) {
-            if (children.get(startIndex).getStat().getCzxid() != lastCzxid) {
-                break;
+        long nextCzxid = children.get(lastAddedIndex + 1).getStat().getCzxid();
+        int nextCzixdOffset = 0;
+
+        if (nextCzxid == lastCzxid) {
+            // Find the minCzxidOffset next next page by searching the index (startIndex) of czxid
+            // that is not equal to current czxid.
+            // minCzxidOffset of next page = lastAddedIndex - startIndex
+            int startIndex = lastAddedIndex;
+            while (startIndex >= 0) {
+                if (children.get(startIndex).getStat().getCzxid() != lastCzxid) {
+                    break;
+                }
+                startIndex--;
             }
-            startIndex--;
+            nextCzixdOffset = lastAddedIndex - startIndex;
         }
-        nextPage.setMinCzxid(lastCzxid);
-        nextPage.setMinCzxidOffset(lastAddedIndex - startIndex);
+
+        nextPage.setMinCzxid(nextCzxid);
+        nextPage.setMinCzxidOffset(nextCzixdOffset);
     }
 
     public Stat setACL(String path, List<ACL> acl, int version) throws KeeperException.NoNodeException {

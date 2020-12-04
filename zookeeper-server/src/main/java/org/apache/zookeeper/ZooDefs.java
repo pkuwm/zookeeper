@@ -164,6 +164,7 @@ public class ZooDefs {
     @InterfaceAudience.Public
     public interface GetChildrenPaginated {
         long lastPageMinCzxid = -1L;
+        int lastPageCzxidOffset = -1;
     }
 
     public static final String[] opNames = {"notification", "create", "delete", "exists", "getData", "setData", "getACL", "setACL", "getChildren", "getChildren2", "getMaxChildren", "setMaxChildren", "ping", "reconfig", "getConfig"};
