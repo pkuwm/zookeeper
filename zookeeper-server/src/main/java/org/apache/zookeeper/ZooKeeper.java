@@ -2878,40 +2878,46 @@ public class ZooKeeper implements AutoCloseable {
             return childrenPaginated;
         }
 
-        Set<String> childrenSet = new HashSet<>(childrenPaginated);
-        getChildrenRemainingPages(path, watcher, nextPage, childrenSet);
+        Set<String> childrenSet = getChildrenRemainingPages(path, watcher, nextPage, childrenPaginated);
 
         return new ArrayList<>(childrenSet);
     }
 
-    private void getChildrenRemainingPages(String path,
+    private Set<String> getChildrenRemainingPages(String path,
                                            Watcher watcher,
                                            PaginationNextPage nextPage,
-                                           Set<String> childrenSet) throws KeeperException, InterruptedException {
+                                           List<String> childrenPage)
+            throws KeeperException, InterruptedException {
+        Set<String> allChildrenSet = new HashSet<>(childrenPage);
         int retryCount = 0;
+
         do {
-            List<String> childrenPaginated;
             long minCzxid = nextPage.getMinCzxid();
             if (nextPage.getMinCzxidOffset() == 0) {
-                childrenPaginated = getChildren(path, watcher, Integer.MAX_VALUE, minCzxid,
+                childrenPage = getChildren(path, watcher, Integer.MAX_VALUE, minCzxid,
                         nextPage.getMinCzxidOffset(), null, nextPage);
             } else {
                 // If a child with the same czxid is returned in the previous page, and then deleted
                 // on the server, the children not in the previous page but offset is less than czxidOffset
                 // would be missed in the next page. Use the last child in the previous page to determine whether or not
                 // the deletion case happens. If it happens, retry fetching the page starting from offset 0.
-                childrenPaginated = getChildren(path, watcher, Integer.MAX_VALUE, minCzxid,
+                String lastChild = childrenPage.isEmpty() ? "" : childrenPage.get(childrenPage.size() - 1);
+                childrenPage = getChildren(path, watcher, Integer.MAX_VALUE, minCzxid,
                         nextPage.getMinCzxidOffset() - 1, null, nextPage);
-                if (!childrenPaginated.isEmpty() && !childrenSet.contains(childrenPaginated.get(0))) {
-                    if (retryCount++ >= 3) {
+                if (!lastChild.equals(childrenPage.get(0))) {
+                    if (retryCount++ >= 5) {
+                        LOG.warn("Failed to fetch children pages because of znode deletion and retries exceeding 5");
                         throw KeeperException.create(Code.OPERATIONTIMEOUT);
                     }
-                    LOG.info("Retry fetching children for minZxid = {}, retries = {}", minCzxid, retryCount);
-                    childrenPaginated = getChildren(path, watcher, Integer.MAX_VALUE, minCzxid, 0, null, nextPage);
+                    LOG.info("Due to znode deletion, retry fetching children from offset 0 for minCzxid={}, retries={}",
+                            minCzxid, retryCount);
+                    childrenPage = getChildren(path, watcher, Integer.MAX_VALUE, minCzxid, 0, null, nextPage);
                 }
             }
-            childrenSet.addAll(childrenPaginated);
+            allChildrenSet.addAll(childrenPage);
         } while (nextPage.getMinCzxid() != ZooDefs.GetChildrenPaginated.lastPageMinCzxid);
+
+        return allChildrenSet;
     }
 
     private void updateNextPage(PaginationNextPage nextPage, long minCzxId, int czxIdOffset) {
