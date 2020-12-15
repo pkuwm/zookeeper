@@ -507,7 +507,7 @@ public class GetChildrenPaginatedTest extends ClientBase {
         // This should not trigger additional watches or create duplicates in the set of children returned
         zk.setData(basePath + "/" + firstPage.get(0), new byte[3], -1);
 
-        synchronized(fireOnlyOnceWatcher) {
+        synchronized (fireOnlyOnceWatcher) {
             Assert.assertEquals("Watch should not have fired yet", 0, fireOnlyOnceWatcher.watchFiredCount);
         }
 
@@ -521,7 +521,7 @@ public class GetChildrenPaginatedTest extends ClientBase {
 
         zk.setData(basePath + "/" + secondPage.get(0), new byte[3], -1);
 
-        synchronized(fireOnlyOnceWatcher) {
+        synchronized (fireOnlyOnceWatcher) {
             Assert.assertEquals("Watch has fired", 0, fireOnlyOnceWatcher.watchFiredCount);
         }
 

@@ -45,9 +45,9 @@ public class PaginationNextPage {
 
     @Override
     public String toString() {
-        return "PaginationNextPage{" +
-                "minCzxid=" + minCzxid +
-                ", minCzxidOffset=" + minCzxidOffset +
-                '}';
+        return "PaginationNextPage{"
+                + "minCzxid=" + minCzxid
+                + ", minCzxidOffset=" + minCzxidOffset
+                + '}';
     }
 }
