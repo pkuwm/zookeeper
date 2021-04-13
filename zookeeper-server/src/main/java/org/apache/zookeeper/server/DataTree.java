@@ -940,7 +940,7 @@ public class DataTree {
     }
 
     private boolean canPacketFitInMaxBuffer(int packetLength) {
-        return packetLength <= BinaryInputArchive.maxBuffer;
+        return packetLength < BinaryInputArchive.maxBuffer;
     }
 
     private int countReadChildrenBytes(Collection<String> children) {
